@@ -1,0 +1,2 @@
+# WAVPWBVR.dll (DirectSound/WaveOut audio driver plugin, preferred base 0x10000000 -> 0x11000000)
+entry 1000D710 DllMain

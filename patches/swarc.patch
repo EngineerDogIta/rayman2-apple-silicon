@@ -1,0 +1,144 @@
+diff --git a/platforms/win32/src/win32/hle.cpp b/platforms/win32/src/win32/hle.cpp
+index b2449dd..e05d769 100644
+--- a/platforms/win32/src/win32/hle.cpp
++++ b/platforms/win32/src/win32/hle.cpp
+@@ -30,7 +30,8 @@ const std::vector<std::string>& KnownDlls() {
+       "kernel32.dll", "user32.dll",  "gdi32.dll",    "advapi32.dll",
+       "ole32.dll",    "version.dll", "winmm.dll",    "wsock32.dll",
+       "ddraw.dll",    "mss32.dll",   "binkw32.dll",  "dbghelp.dll",
+-      "imm32.dll",    "shfolder.dll", "ntdll.dll",   "opengl32.dll"};
++      "imm32.dll",    "shfolder.dll", "ntdll.dll",   "opengl32.dll",
++      "dinput.dll",   "glide2x.dll",  "msvcrt.dll",  "shell32.dll"};
+   return dlls;
+ }
+ 
+diff --git a/platforms/win32/src/win32/kernel32.cpp b/platforms/win32/src/win32/kernel32.cpp
+index 125a80d..1fd6eef 100644
+--- a/platforms/win32/src/win32/kernel32.cpp
++++ b/platforms/win32/src/win32/kernel32.cpp
+@@ -165,6 +165,9 @@ std::recursive_mutex g_loader_mu;
+ 
+ Module* LiftedDll(const std::string& name) {
+   std::string n = NormaliseDll(name);
++  // Rayman 2's Snd_Cpa.ini may select MMX or W-suffixed variants; route to our lifted P5/PW DLLs.
++  if (n == "apmpwbvr.dll" || n == "apmmxbvr.dll") n = "apmp5bvr.dll";
++  if (n == "wavmwbvr.dll") n = "wavpwbvr.dll";
+   for (Module& m : g_win32->modules)
+     if (m.name == n) return &m;
+   return nullptr;
+@@ -276,9 +279,14 @@ HLE64("kernel32.dll", GetProcAddress, 2) {
+   gaddr mod = Arg(c, 0), name = Arg(c, 1);
+   {
+     std::lock_guard<std::recursive_mutex> l(g_loader_mu);
+-    if (Module* m = LoadedDllAt(mod)) {
++    // Support GetModuleHandle(NULL) / EXE image_base exports (used by Rayman 2 audio DLLs).
++    const PeImage* img = (mod == g_win32->img.image_base) ? &g_win32->img : nullptr;
++    if (!img) {
++      if (Module* m = LoadedDllAt(mod)) img = &m->img;
++    }
++    if (img) {
+       std::string n = name < 0x10000 ? std::string() : GStr(name);
+-      for (const PeExport& e : m->img.exports)
++      for (const PeExport& e : img->exports)
+         if (name < 0x10000 ? e.ordinal == name : e.name == n) return e.va;
+       SetLastError(kErrorProcNotFound);
+       return 0;
+diff --git a/platforms/win32/src/win32/kernel32_file.cpp b/platforms/win32/src/win32/kernel32_file.cpp
+index e5c3fd3..12e4088 100644
+--- a/platforms/win32/src/win32/kernel32_file.cpp
++++ b/platforms/win32/src/win32/kernel32_file.cpp
+@@ -136,6 +136,25 @@ std::string GuestCurrentDir() {
+   return g_cwd.empty() ? GuestGameDir() : g_cwd;
+ }
+ 
++bool SetGuestCurrentDir(const std::string& guest_dir) {
++  std::string abs = AbsGuest(guest_dir);
++  bool ok = false;
++  struct stat st;
++  for (const auto& hd : HostDirs(abs)) {
++    if (stat(hd.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
++      ok = true;
++      break;
++    }
++  }
++  if (!ok) {
++    hle::SetLastError(2);  // ERROR_FILE_NOT_FOUND
++    return false;
++  }
++  std::lock_guard<std::mutex> l(g_cwd_mu);
++  g_cwd = std::move(abs);
++  return true;
++}
++
+ namespace {
+ 
+ std::string OverlayRoot() { return DataDir() + "/install"; }
+diff --git a/platforms/win32/src/win32/kernel32_state.h b/platforms/win32/src/win32/kernel32_state.h
+index 4bdf79c..160dc46 100644
+--- a/platforms/win32/src/win32/kernel32_state.h
++++ b/platforms/win32/src/win32/kernel32_state.h
+@@ -99,6 +99,7 @@ std::string NarrowPath(const std::u16string& path);
+ // merged listings (overlay first). One entry outside the install.
+ std::vector<std::string> HostDirs(const std::string& guest_dir);
+ std::string GuestCurrentDir();
++bool SetGuestCurrentDir(const std::string& guest_dir);
+ 
+ // The process's main thread gets the thread object CreateThread gives the
+ // others (GetCurrentThread, DuplicateHandle, waits).
+diff --git a/platforms/win32/src/win32/kernel32_sync.cpp b/platforms/win32/src/win32/kernel32_sync.cpp
+index 2e116d8..66946db 100644
+--- a/platforms/win32/src/win32/kernel32_sync.cpp
++++ b/platforms/win32/src/win32/kernel32_sync.cpp
+@@ -323,6 +323,8 @@ uint32_t OpenNamed(gaddr name_va, KObject::Type type) {
+   return NewHandle(it->second);
+ }
+ 
++HLE("kernel32.dll", OpenEventA, 3) { return OpenNamed(Arg(c, 2), KObject::Type::Event); }
++
+ HLE("kernel32.dll", OpenMutexA, 3) { return OpenNamed(Arg(c, 2), KObject::Type::Mutex); }
+ 
+ HLE("kernel32.dll", ReleaseMutex, 1) {
+diff --git a/platforms/win32/src/win32/user32_window.cpp b/platforms/win32/src/win32/user32_window.cpp
+index d72bda4..b57424e 100644
+--- a/platforms/win32/src/win32/user32_window.cpp
++++ b/platforms/win32/src/win32/user32_window.cpp
+@@ -772,6 +772,11 @@ void UpdateFullscreenAll() {
+ 
+ }  // namespace
+ 
++void PostThreadMessageHost(uint32_t tid, uint32_t msg, uint32_t wparam, uint32_t lparam) {
++  if (!tid) return;
++  PostTo(tid, Msg{0, msg, wparam, lparam, TickCount(), g_mouse_x, g_mouse_y});
++}
++
+ bool OnMainThread() { return std::this_thread::get_id() == g_main_thread_id; }
+ 
+ void EnsureSdlVideo() {
+@@ -1750,6 +1755,13 @@ HLE("user32.dll", PostMessageA, 4) {
+   return 1;
+ }
+ 
++HLE("user32.dll", PostThreadMessageA, 4) {
++  uint32_t tid = uint32_t(Arg(c, 0));
++  if (!tid) return 0;
++  PostThreadMessageHost(tid, uint32_t(Arg(c, 1)), uint32_t(Arg(c, 2)), uint32_t(Arg(c, 3)));
++  return 1;
++}
++
+ HLE("user32.dll", PostQuitMessage, 1) {
+   {
+     std::lock_guard<std::recursive_mutex> l(g_mu);
+diff --git a/platforms/win32/src/win32/user32_window.h b/platforms/win32/src/win32/user32_window.h
+index d12f8d2..59db087 100644
+--- a/platforms/win32/src/win32/user32_window.h
++++ b/platforms/win32/src/win32/user32_window.h
+@@ -13,6 +13,9 @@ namespace recomp {
+ // The SDL window behind a top-level HWND, or nullptr.
+ SDL_Window* SdlWindowFor(uint32_t hwnd);
+ 
++// Post a Win32 message directly to a guest thread's message queue.
++void PostThreadMessageHost(uint32_t tid, uint32_t msg, uint32_t wparam, uint32_t lparam);
++
+ // HDCs: GetDC(hwnd) returns DcForWindow(hwnd); WindowForDc maps it back
+ // (0 for the screen DC or anything else).
+ uint32_t DcForWindow(uint32_t hwnd);

@@ -1,0 +1,25 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "arm64-release",
+      "displayName": "macOS Apple Silicon (Release)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "RECOMP_LLVM_ROOT": "/opt/homebrew/opt/llvm",
+        "RECOMP_ALLOW_MISSING_TEST_TOOLS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "arm64-release",
+      "configurePreset": "arm64-release"
+    }
+  ]
+}

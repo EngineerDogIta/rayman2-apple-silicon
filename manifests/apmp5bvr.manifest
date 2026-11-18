@@ -1,0 +1,2 @@
+# APMP5BVR.dll (ADPCM audio decoder plugin, preferred base 0x10000000 -> 0x12000000)
+entry 10006180 DllMain

@@ -1,0 +1,21 @@
+# Rayman 2: The Great Escape (GOG v2 Retail) - Main executable manifest
+entry 45FCC0 CRT_Start
+name 4022D0 GAM_fn_WndProc
+name 401000 GAM_fn_vInitEngineWhenInitApplication
+name 4829D0 R2_fn_szGetStringFromTextOrStringParam
+
+# Focus-loss freeze fix (Cmd+Tab immunity)
+replace 4016E0 R2_fn_bAppliOnDeActivate
+replace 401790 R2_fn_bAppliOnActivate
+
+# macOS Input overhaul (WASD + Mouse/Trackpad + SDL_Gamepad + DirectInput enum fix)
+replace 495170 R2_fn_InputEnum
+replace 496590 INO_fn_wReadKeyboard
+replace 413890 IPT_fn_vEngineReadInput
+
+# Widescreen 16:9 / 16:10 Hor+ FOV & HUD aspect ratio hooks
+replace 422AB0 GLI_xAdjustCameraToViewport2
+replace 422940 GLI_vGet3DVertexFromScreenPos
+replace 446590 POS_fn_vSetTranslationVector
+replace 429670 GLI_vDraw2DSpriteWithPercent
+replace 4710C0 R2_fn_p_stSPOSuperimpoed
