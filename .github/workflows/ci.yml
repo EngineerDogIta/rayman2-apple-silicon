@@ -1,0 +1,66 @@
+name: CI (Apple Silicon)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-and-verify:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew update
+          brew install cmake ninja llvm sdl3 innoextract mingw-w64
+
+      - name: Lint scripts and check repository hygiene
+        run: |
+          bash -n setup.sh "Install Rayman 2.command" packaging/build_app_bundle.sh
+          python3 -m py_compile tools/generate_symbols.py
+          ./setup.sh --help >/dev/null
+          if grep -rn "/Users/yari" .gitignore CMakeLists.txt CMakePresets.json README.md setup.sh "Install Rayman 2.command" manifests/ packaging/ patches/ src/ tools/ 2>/dev/null; then
+            echo "Found hardcoded personal path!"
+            exit 1
+          fi
+
+      - name: Clone SwARc and verify patch
+        run: |
+          mkdir -p third_party
+          git clone --depth 1 https://github.com/JTM-rootstorm/SwARc.git third_party/SwARc
+          git -C third_party/SwARc fetch --depth 1 origin 6b25b3c || true
+          git -C third_party/SwARc checkout 6b25b3c || true
+          git -C third_party/SwARc apply --check ../../patches/swarc.patch
+          git -C third_party/SwARc apply ../../patches/swarc.patch
+
+      - name: Build SwARc (recomp_lift, recomp_win32, recomp_gfx)
+        run: |
+          LLVM_ROOT="$(brew --prefix llvm)"
+          cmake -S third_party/SwARc -B build/swarc_tools -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DRECOMP_LLVM_ROOT="$LLVM_ROOT" \
+            -DRECOMP_ALLOW_MISSING_TEST_TOOLS=ON \
+            -DBUILD_TESTING=OFF
+          cmake --build build/swarc_tools --target recomp_lift recomp_win32 recomp_gfx -j"$(sysctl -n hw.ncpu)"
+          test -x build/swarc_tools/tools/lifter_x86/recomp_lift
+
+      - name: Type-check port HLE and hook C++ sources
+        run: |
+          SDL_INC="$(pkg-config --cflags sdl3)"
+          for f in src/main.cpp src/hle/*.cpp src/hooks/*.cpp; do
+            echo "Checking $f ..."
+            clang++ -std=c++20 -fsyntax-only \
+              -Isrc \
+              -Ithird_party/SwARc/src \
+              -Ithird_party/SwARc/platforms/win32/src \
+              $SDL_INC \
+              "$f"
+          done
