@@ -1,4 +1,4 @@
-# Rayman 2: The Great Escape — Native Apple Silicon Port
+# Rayman 2: The Great Escape — Apple Silicon Port
 
 A native `arm64-apple-macos` static binary recompilation port of **Rayman 2: The Great Escape** (PC GOG v2) for Apple Silicon Macs — no Wine, no VM, and no runtime x86 emulation.
 
@@ -11,26 +11,34 @@ A native `arm64-apple-macos` static binary recompilation port of **Rayman 2: The
 - **macOS & Gamepad Controls**: DirectInput 5 COM HLE (`src/hooks/macos_input.cpp`) supporting `WASD` + Arrows, Mouse/Trackpad camera, and DualSense/Xbox/MFi controllers (`SDL_Gamepad`).
 - **Standalone `.app` Bundle**: `packaging/build_app_bundle.sh` produces a self-contained, ad-hoc signed `build/Rayman 2.app`.
 
-## Prerequisites (Homebrew)
+---
+
+## 1-Click Setup (Recommended)
+1. Make sure [Homebrew](https://brew.sh) is installed on your Mac.
+2. Download or clone this repository:
+   ```bash
+   git clone https://github.com/EngineerDogIta/rayman2-apple-silicon.git
+   ```
+3. Double-click **`Install Rayman 2.command`** in Finder.
+   - It automatically installs any missing Homebrew build tools (`cmake`, `ninja`, `llvm`, `sdl3`, `innoextract`, `mingw-w64`, `python3`).
+   - Prompts you with a native macOS file picker to select your GOG `setup_rayman_2_-_the_great_escape_*.exe` installer (keep its `.bin` file in the same folder) or an existing game folder.
+   - Builds `Rayman 2.app` and offers to copy it to `/Applications` and launch it.
+
+---
+
+## CLI Setup (Advanced)
 ```bash
-brew install cmake ninja llvm sdl3 innoextract mingw-w64 python3
+git clone https://github.com/EngineerDogIta/rayman2-apple-silicon.git
+cd rayman2-apple-silicon
+./setup.sh --auto-deps /path/to/setup_rayman_2_-_the_great_escape_1.0_gog_v2_\(86383\).exe
+open "build/Rayman 2.app"
+```
+To clean and rebuild from scratch after pulling updates:
+```bash
+./setup.sh --clean
 ```
 
-## Quick Start (From GOG Installer)
-1. Clone this repository:
-   ```bash
-   git clone <your-repo-url>
-   cd rayman-mac-silicon-port
-   ```
-2. Place your GOG installer files (`setup_rayman_2_-_the_great_escape_1.0_gog_v2_*.exe` and `.bin`) anywhere convenient, then run:
-   ```bash
-   ./setup.sh /path/to/setup_rayman_2_-_the_great_escape_1.0_gog_v2_\(86383\).exe
-   ```
-   *(Or pass an already-extracted PC game directory containing `Rayman2.exe`.)*
-3. Launch the app:
-   ```bash
-   open "build/Rayman 2.app"
-   ```
+---
 
 ## Default Controls
 | Action | Keyboard / Mouse | Gamepad |
@@ -45,3 +53,6 @@ brew install cmake ninja llvm sdl3 innoextract mingw-w64 python3
 | HUD Display | `Tab` / `J` | Back / Select |
 | Confirm / Skip Cutscene | `Enter` / `Space` | `A` / Cross / Start |
 | Quit | `Cmd+Q` / Window `[X]` / In-Game `EXIT` | — |
+
+## License
+Port, HLE, hooks, and build tooling are licensed under the [MIT License](LICENSE). Original *Rayman 2: The Great Escape* binaries and assets remain copyright Ubisoft Entertainment.

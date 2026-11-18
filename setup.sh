@@ -9,7 +9,12 @@ SWARC_COMMIT="6b25b3c"
 
 usage() {
   cat <<'EOF'
-Usage: ./setup.sh <path-to-gog-installer.exe | path-to-installed-game-dir>
+Usage: ./setup.sh [options] [path-to-gog-installer.exe | path-to-installed-game-dir]
+
+Options:
+  --auto-deps    Automatically install missing Homebrew packages
+  --clean        Remove build/, generated/, and symbols/ before building
+  -h, --help     Show this help message
 
 Builds Rayman 2: The Great Escape natively for Apple Silicon (arm64-apple-macos)
 from your own legal GOG copy of the game:
@@ -20,17 +25,55 @@ from your own legal GOG copy of the game:
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
+AUTO_DEPS=0
+CLEAN=0
+INPUT_PATH=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --auto-deps) AUTO_DEPS=1; shift ;;
+    --clean|--rebuild) CLEAN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "Error: unknown option '$1'" >&2; usage; exit 1 ;;
+    *)
+      if [[ -n "$INPUT_PATH" ]]; then
+        echo "Error: unexpected extra argument '$1'" >&2
+        usage
+        exit 1
+      fi
+      INPUT_PATH="$1"
+      shift
+      ;;
+  esac
+done
+
+# Ensure Homebrew is in PATH when launched from Finder / non-login shells
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
-INPUT_PATH="${1:-}"
-GAME_DIR="$ROOT_DIR/game"
+if [[ "$AUTO_DEPS" -eq 1 ]]; then
+  if ! command -v brew >/dev/null 2>&1; then
+    echo "Error: Homebrew is not installed. Install it from https://brew.sh and retry." >&2
+    exit 1
+  fi
+  MISSING_FORMULAS=()
+  command -v cmake >/dev/null 2>&1 || MISSING_FORMULAS+=(cmake)
+  command -v ninja >/dev/null 2>&1 || MISSING_FORMULAS+=(ninja)
+  command -v python3 >/dev/null 2>&1 || MISSING_FORMULAS+=(python3)
+  command -v innoextract >/dev/null 2>&1 || MISSING_FORMULAS+=(innoextract)
+  command -v i686-w64-mingw32-objdump >/dev/null 2>&1 || MISSING_FORMULAS+=(mingw-w64)
+  brew list --versions llvm >/dev/null 2>&1 || MISSING_FORMULAS+=(llvm)
+  brew list --versions sdl3 >/dev/null 2>&1 || MISSING_FORMULAS+=(sdl3)
+  if [[ ${#MISSING_FORMULAS[@]} -gt 0 ]]; then
+    echo "==> Installing missing Homebrew packages: ${MISSING_FORMULAS[*]} ..."
+    brew install "${MISSING_FORMULAS[@]}"
+  fi
+fi
 
 for tool in cmake ninja python3 git; do
   if ! command -v "$tool" >/dev/null 2>&1; then
-    echo "Error: missing required tool '$tool'. Install with Homebrew: brew install cmake ninja python3 git" >&2
+    echo "Error: missing required tool '$tool'. Install with: brew install cmake ninja python3 git" >&2
     exit 1
   fi
 done
@@ -39,6 +82,22 @@ if ! command -v i686-w64-mingw32-objdump >/dev/null 2>&1; then
   echo "Error: missing i686-w64-mingw32-objdump. Install with: brew install mingw-w64" >&2
   exit 1
 fi
+
+LLVM_ROOT="${RECOMP_LLVM_ROOT:-}"
+if [[ -z "$LLVM_ROOT" ]] && command -v brew >/dev/null 2>&1; then
+  LLVM_PREFIX="$(brew --prefix llvm 2>/dev/null || true)"
+  if [[ -n "$LLVM_PREFIX" && -d "$LLVM_PREFIX" ]]; then
+    LLVM_ROOT="$LLVM_PREFIX"
+  fi
+fi
+LLVM_ROOT="${LLVM_ROOT:-/opt/homebrew/opt/llvm}"
+
+if [[ "$CLEAN" -eq 1 ]]; then
+  echo "==> Cleaning build/, generated/, and symbols/ ..."
+  rm -rf "$ROOT_DIR/build" "$ROOT_DIR/generated" "$ROOT_DIR/symbols"
+fi
+
+GAME_DIR="$ROOT_DIR/game"
 
 if [[ -n "$INPUT_PATH" ]]; then
   if [[ -f "$INPUT_PATH" ]]; then
@@ -88,14 +147,14 @@ if [[ -f "$ROOT_DIR/patches/swarc.patch" ]]; then
   fi
 fi
 
-echo "==> Configuring CMake (arm64-release) ..."
+echo "==> Configuring CMake (arm64-release, LLVM=$LLVM_ROOT) ..."
 if [[ ! -d "$ROOT_DIR/generated" || ! -f "$ROOT_DIR/generated/table.cpp" ]]; then
   # Build recomp_lift directly from SwARc first because recomp_add_lifted() expects generated/
   cmake -S "$ROOT_DIR/third_party/SwARc" -B "$ROOT_DIR/build/swarc_tools" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
-    -DRECOMP_LLVM_ROOT="${RECOMP_LLVM_ROOT:-/opt/homebrew/opt/llvm}" \
+    -DRECOMP_LLVM_ROOT="$LLVM_ROOT" \
     -DRECOMP_ALLOW_MISSING_TEST_TOOLS=ON \
     -DBUILD_TESTING=OFF
   cmake --build "$ROOT_DIR/build/swarc_tools" --target recomp_lift -j"$(sysctl -n hw.ncpu)"
@@ -126,7 +185,7 @@ if [[ ! -d "$ROOT_DIR/generated" || ! -f "$ROOT_DIR/generated/table.cpp" ]]; the
     --out "$ROOT_DIR/generated"
 fi
 
-cmake --preset arm64-release
+cmake --preset arm64-release -DRECOMP_LLVM_ROOT="$LLVM_ROOT"
 cmake --build "$ROOT_DIR/build" -j"$(sysctl -n hw.ncpu)"
 
 echo "==> Packaging standalone macOS app bundle ..."
